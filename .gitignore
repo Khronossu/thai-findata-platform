@@ -6,3 +6,5 @@ __pycache__/
 *.egg-info/
 uncommitted/
 THAI_FINANCIAL_PLATFORM_SPEC.md
+CLAUDE.md
+.venv/
