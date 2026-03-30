@@ -8,15 +8,15 @@ An end-to-end regulated data platform processing PromptPay transactions and SET 
 
 ```mermaid
 graph LR
-    A[PromptPay Producer] --> K1[Kafka\nprompthpay_transactions]
-    B[SET Producer] --> K2[Kafka\nset_price_feed]
+    A[PromptPay Producer] --> K1[Kafka<br/>promptpay_transactions]
+    B[SET Producer] --> K2[Kafka<br/>set_price_feed]
     K1 --> C[Spark Structured Streaming]
     K2 --> C
-    C --> D[Bronze Layer\nIceberg on MinIO]
-    D --> E[Great Expectations\nData Quality]
-    E --> F[dbt Silver\nStaging Models]
-    F --> G[dbt Gold\nFact + Dim Models]
-    G --> H[Anomaly Detector\nRolling 2-sigma]
+    C --> D[Bronze Layer<br/>Iceberg on MinIO]
+    D --> E[Great Expectations<br/>Data Quality]
+    E --> F[dbt Silver<br/>Staging Models]
+    F --> G[dbt Gold<br/>Fact + Dim Models]
+    G --> H[Anomaly Detector<br/>Rolling 2-sigma]
     H --> I[Slack Alerts]
     J[Airflow] -.->|orchestrates| C
     J -.->|orchestrates| E
