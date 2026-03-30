@@ -1,9 +1,3 @@
-"""
-Stage 3 — Bronze Ingestion
-Reads PromptPay transactions from Kafka, validates, applies PII masking,
-and writes to Iceberg bronze tables.
-Invalid records go to quarantine — never silently dropped.
-"""
 import os
 import uuid
 import hashlib
@@ -15,7 +9,7 @@ from pyspark.sql.types import (
     StringType, DoubleType, BooleanType,
 )
 
-# ── SPARK SESSION ────────────────────────────────────────────────
+#spark session
 spark = SparkSession.builder \
     .appName("ThaiPlatformBronzeIngestion") \
     .config("spark.sql.extensions",
@@ -32,13 +26,11 @@ spark = SparkSession.builder \
     .getOrCreate()
 
 spark.sparkContext.setLogLevel("WARN")
-
-# ── CONSTANTS ────────────────────────────────────────────────────
+ 
 PIPELINE_RUN_ID = str(uuid.uuid4())
 SALT = os.environ["PII_SALT"]
 SOURCE_TOPIC = "promptpay_transactions"
 
-# ── KAFKA MESSAGE SCHEMA ─────────────────────────────────────────
 PROMPTPAY_SCHEMA = StructType([
     StructField("transaction_id",     StringType(),  True),
     StructField("sender_national_id", StringType(),  True),
@@ -47,14 +39,12 @@ PROMPTPAY_SCHEMA = StructType([
     StructField("amount_thb",         DoubleType(),  True),
     StructField("merchant_category",  StringType(),  True),
     StructField("channel",            StringType(),  True),
-    StructField("location_lat",       DoubleType(),  True),
-    StructField("location_lng",       DoubleType(),  True),
     StructField("event_timestamp",    StringType(),  True),
     StructField("is_anomaly",         BooleanType(), True),
     StructField("anomaly_type",       StringType(),  True),
 ])
 
-# ── PII MASKING UDFs ─────────────────────────────────────────────
+#PII MASKING UDFs
 # Applied before Bronze write — unmasked PII never reaches the data lake.
 
 @F.udf(StringType())
@@ -69,7 +59,7 @@ def mask_account(account: str) -> str:
         return None
     return f"****{account[-4:]}"
 
-# ── TABLE SETUP ──────────────────────────────────────────────────
+#TABLE SETUP
 def create_tables_if_not_exist() -> None:
     spark.sql("""
         CREATE TABLE IF NOT EXISTS local.bronze.transactions (
@@ -80,8 +70,6 @@ def create_tables_if_not_exist() -> None:
             amount_thb               DOUBLE    NOT NULL,
             merchant_category        STRING    NOT NULL,
             channel                  STRING    NOT NULL,
-            location_lat             DOUBLE,
-            location_lng             DOUBLE,
             event_timestamp          TIMESTAMP NOT NULL,
             is_anomaly               BOOLEAN   NOT NULL,
             anomaly_type             STRING,
@@ -110,7 +98,7 @@ def create_tables_if_not_exist() -> None:
         TBLPROPERTIES ('format-version' = '2')
     """)
 
-# ── BATCH PROCESSOR ──────────────────────────────────────────────
+#BATCH PROCESSOR
 def process_batch(batch_df, epoch_id) -> None:
     if batch_df.isEmpty():
         return
@@ -164,8 +152,6 @@ def process_batch(batch_df, epoch_id) -> None:
             F.col("d.amount_thb"),
             F.col("d.merchant_category"),
             F.col("d.channel"),
-            F.col("d.location_lat"),
-            F.col("d.location_lng"),
             event_ts.alias("event_timestamp"),
             F.col("d.is_anomaly"),
             F.col("d.anomaly_type"),
@@ -177,7 +163,7 @@ def process_batch(batch_df, epoch_id) -> None:
 
     valid_df.unpersist()
 
-# ── STREAMING READ ───────────────────────────────────────────────
+#STREAMING READ 
 def build_stream():
     df_raw = spark.readStream \
         .format("kafka") \
@@ -205,7 +191,7 @@ def build_stream():
         .foreachBatch(process_batch) \
         .start()
 
-# ── ENTRY POINT ──────────────────────────────────────────────────
+#ENTRY POINT
 if __name__ == "__main__":
     create_tables_if_not_exist()
     query = build_stream()
