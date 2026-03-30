@@ -40,6 +40,38 @@ graph LR
 
 ---
 
+## Project Structure
+
+```
+financial_platform_proj/
+├── producers/
+│   ├── promptpay_producer.py     # Kafka producer — 10k events/min, 4 fraud patterns
+│   └── set_producer.py           # yfinance daily fetch, T+1 correction simulation
+├── spark/jobs/
+│   └── bronze_ingestion.py       # PySpark Structured Streaming → Iceberg Bronze
+├── data_quality/
+│   ├── expectations.py           # Great Expectations suites (programmatic, no config files)
+│   └── quarantine.py             # Writes failed records to local.bronze.quarantine
+├── dbt/thai_platform/models/
+│   ├── staging/                  # Silver: dedup, type casting, no business logic
+│   └── gold/                     # Gold: fct_transactions, dim_customer_risk_profile (SCD2),
+│                                 #       dim_set_ticker, fct_daily_returns
+├── airflow/dags/
+│   ├── streaming_monitor.py      # Checks Bronze freshness every 5 min
+│   ├── dbt_transformation.py     # Hourly Silver → Gold, triggers data quality check
+│   ├── data_quality_check.py     # Runs GE validation suite on Bronze
+│   ├── iceberg_compaction.py     # Nightly binpack compaction at 02:00
+│   └── set_price_ingestion.py    # Daily SET price fetch at 18:00 Asia/Bangkok
+├── observability/
+│   └── anomaly_detector.py       # Rolling 14-day mean ± 2σ, day-of-week segmented
+├── tests/
+│   ├── test_masking.py           # PII masking unit tests (15 cases, no Spark required)
+│   └── test_transformation.py    # Dedup, negative amount filter, quarantine routing
+└── .github/workflows/ci.yml      # PR-gated: pytest + dbt compile
+```
+
+---
+
 ## Data Sources
 
 **PromptPay transactions** — simulated at 10,000 events/min with a 500-sender pool. Anomaly patterns (velocity burst, amount spike, dormant spike) are structurally valid JSON — the fraud signal is behavioral, not structural. This reflects real fraud detection difficulty.
