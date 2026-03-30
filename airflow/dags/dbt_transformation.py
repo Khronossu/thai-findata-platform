@@ -1,5 +1,6 @@
 from airflow import DAG
 from airflow.operators.bash import BashOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from datetime import datetime, timedelta
 
 with DAG(
@@ -18,5 +19,9 @@ with DAG(
         bash_command='dbt run --select gold.*',
         sla=timedelta(minutes=15)
     )
+    trigger_quality_check = TriggerDagRunOperator(
+        task_id='trigger_quality_check',
+        trigger_dag_id='data_quality_check'
+    )
 
-    t_run_silver >> t_run_gold
+    t_run_silver >> t_run_gold >> trigger_quality_check
