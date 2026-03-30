@@ -4,9 +4,10 @@ import random
 import uuid
 from datetime import datetime, timedelta, timezone
 from kafka import KafkaProducer
+import os
 
 # ── CONFIG ─────────────────────────────────────────────────────
-KAFKA_BOOTSTRAP = 'localhost:9092'
+KAFKA_BOOTSTRAP = os.environ['KAFKA_BOOTSTRAP_SERVERS']
 TOPIC = 'promptpay_transactions'
 TARGET_RATE = 10000          # events per minute
 BATCH_SIZE = 100             # events per batch
@@ -23,91 +24,13 @@ MERCHANT_CATEGORIES = {
     'education':    {'weight': 0.07, 'avg_amount': 8000,  'std': 3000},
 }
 
-REGIONS = {
-    'bangkok': {
-        'weight': 0.55,
-        'coords': [
-            (13.7563, 100.5018),   # Rattanakosin
-            (13.7308, 100.5204),   # Silom
-            (13.7480, 100.5347),   # Asok
-            (13.7956, 100.5508),   # Chatuchak
-            (13.6900, 100.5993),   # Bangna
-            (13.7100, 100.4957),   # Thonburi
-            (13.8136, 100.5614),   # Don Mueang
-            (13.6757, 100.6081),   # Samut Prakan fringe
-        ],
-        'jitter_std': 0.015,
-    },
-    'perimeter': {
-        'weight': 0.15,
-        'coords': [
-            (13.9920, 100.6175),   # Pathum Thani
-            (13.5383, 100.4738),   # Samut Sakhon
-            (14.0723, 100.6068),   # Rangsit
-            (13.6531, 100.6466),   # Samut Prakan
-        ],
-        'jitter_std': 0.03,
-    },
-    'central': {
-        'weight': 0.08,
-        'coords': [
-            (14.3514, 100.5770),   # Ayutthaya
-            (14.9743, 100.4025),   # Nakhon Sawan
-            (13.3622, 100.9847),   # Chonburi / EEC
-        ],
-        'jitter_std': 0.04,
-    },
-    'north': {
-        'weight': 0.07,
-        'coords': [
-            (18.7883, 98.9853),    # Chiang Mai — Nimman
-            (18.7961, 99.0003),    # Chiang Mai — Old City
-            (17.0065, 99.8318),    # Phitsanulok
-        ],
-        'jitter_std': 0.04,
-    },
-    'northeast': {
-        'weight': 0.07,
-        'coords': [
-            (14.9798, 102.0978),   # Nakhon Ratchasima
-            (16.4322, 102.8236),   # Khon Kaen
-            (15.2287, 104.8571),   # Ubon Ratchathani
-        ],
-        'jitter_std': 0.04,
-    },
-    'south': {
-        'weight': 0.08,
-        'coords': [
-            (7.8804, 98.3923),     # Phuket
-            (9.1382, 99.3211),     # Surat Thani
-            (7.0086, 100.4747),    # Hat Yai
-            (8.0589, 98.9183),     # Krabi
-        ],
-        'jitter_std': 0.04,
-    },
-}
-
 CHANNELS = {
-    'mobile_app': 0.60,
+    'mobile_app': 0.65,
     'web':        0.22,
     'atm':        0.13,
-    'counter':    0.05,
 }
 
 # ── HELPERS ────────────────────────────────────────────────────
-def pick_region() -> str:
-    return random.choices(
-        list(REGIONS.keys()),
-        weights=[r['weight'] for r in REGIONS.values()],
-    )[0]
-
-def pick_coords(region: str) -> tuple[float, float]:
-    r = REGIONS[region]
-    base = random.choice(r['coords'])
-    return (
-        base[0] + random.gauss(0, r['jitter_std']),
-        base[1] + random.gauss(0, r['jitter_std']),
-    )
 
 def pick_channel() -> str:
     return random.choices(
@@ -122,11 +45,9 @@ def generate_sender_pool(size: int = 500) -> list[dict]:
     pool = []
     for _ in range(size):
         national_id = ''.join([str(random.randint(0, 9)) for _ in range(13)])
-        region = pick_region()
         pool.append({
             'national_id': national_id,
             'account': f'TH{random.randint(10**9, 10**10 - 1)}',
-            'home_region': region,
             'typical_amount_avg': random.uniform(300, 3000),
             'transaction_count_today': 0,
         })
@@ -145,7 +66,6 @@ def generate_normal_event(sender: dict) -> dict:
     amount = max(1.0, random.gauss(cat['avg_amount'], cat['std']))
     amount = round(amount, 2)
     
-    lat, lng = pick_coords(sender['home_region'])
 
     return {
         'transaction_id': str(uuid.uuid4()),
@@ -155,8 +75,6 @@ def generate_normal_event(sender: dict) -> dict:
         'amount_thb': amount,
         'merchant_category': category,
         'channel': pick_channel(),
-        'location_lat': round(lat, 6),
-        'location_lng': round(lng, 6),
         'event_timestamp': datetime.now(timezone.utc).isoformat(),
         'is_anomaly': False,
         'anomaly_type': None,
@@ -199,42 +117,6 @@ def generate_amount_spike(sender: dict) -> dict:
     event['anomaly_type'] = 'amount_spike'
     return event
 
-DISTANT_REGION_PAIRS = [
-    ('bangkok', 'north'),       # ~700 km
-    ('bangkok', 'south'),       # ~800 km
-    ('bangkok', 'northeast'),   # ~400 km
-    ('north',   'south'),       # ~1500 km
-    ('northeast', 'south'),     # ~1000 km
-]
-
-def generate_impossible_geography(sender: dict) -> list[dict]:
-    """
-    Two transactions from the same sender, in two distant regions,
-    minutes apart — physically impossible travel time.
-    """
-    base_time = datetime.now(timezone.utc)
-
-    region_a, region_b = random.choice(DISTANT_REGION_PAIRS)
-    gap_minutes = random.randint(3, 12)
-
-    event_a = generate_normal_event(sender)
-    lat_a, lng_a = pick_coords(region_a)
-    event_a['location_lat'] = round(lat_a, 6)
-    event_a['location_lng'] = round(lng_a, 6)
-    event_a['event_timestamp'] = base_time.isoformat()
-    event_a['is_anomaly'] = True
-    event_a['anomaly_type'] = 'impossible_geography'
-
-    event_b = generate_normal_event(sender)
-    lat_b, lng_b = pick_coords(region_b)
-    event_b['location_lat'] = round(lat_b, 6)
-    event_b['location_lng'] = round(lng_b, 6)
-    event_b['event_timestamp'] = (base_time + timedelta(minutes=gap_minutes)).isoformat()
-    event_b['is_anomaly'] = True
-    event_b['anomaly_type'] = 'impossible_geography'
-
-    return [event_a, event_b]
-
 def generate_dormant_spike(sender: dict) -> list[dict]:
     """
     Sender has low transaction_count_today (simulated as 0-2).
@@ -257,9 +139,8 @@ def generate_dormant_spike(sender: dict) -> list[dict]:
 
 # ── ANOMALY DISPATCHER ─────────────────────────────────────────
 ANOMALY_PATTERNS = [
-    (0.40, 'velocity',   lambda s: generate_velocity_burst(s)),
-    (0.25, 'amount',     lambda s: [generate_amount_spike(s)]),
-    (0.20, 'geography',  lambda s: generate_impossible_geography(s)),
+    (0.50, 'velocity',   lambda s: generate_velocity_burst(s)),
+    (0.35, 'amount',     lambda s: [generate_amount_spike(s)]),
     (0.15, 'dormant',    lambda s: generate_dormant_spike(s)),
 ]
 
@@ -291,7 +172,7 @@ def run():
     anomaly_count = 0
     
     print(f"Starting PromptPay producer — target {TARGET_RATE} events/min")
-    print(f"Anomaly rate: {ANOMALY_RATE*100}% | Patterns: velocity, amount_spike, impossible_geography, dormant_spike")
+    print(f"Anomaly rate: {ANOMALY_RATE*100}% | Patterns: velocity, amount_spike, dormant_spike")
     
     try:
         while True:
