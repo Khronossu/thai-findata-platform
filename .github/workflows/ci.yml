@@ -1,0 +1,30 @@
+name: CI
+
+on:
+    pull_request:
+        branches: [main, develop]
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Check out code
+              uses: actions/checkout@v3
+            
+            - name: Set up Python
+              uses: actions/setup-python@v4
+              with:
+                python-version: '3.11'
+
+            - name: Install dependencies
+              run: pip install -r requirements.txt
+            
+            - name: Run masking tests
+              run: pytest tests/test_masking.py
+
+            - name: Run transformation tests
+              run: pytest tests/test_transformation.py
+            
+            - name: Compile dbt models
+              run: dbt compile --project-dir dbt/thai_platform
