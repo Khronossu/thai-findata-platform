@@ -177,7 +177,7 @@ def process_batch(batch_df, epoch_id) -> None:
 
     # Mask PII and write Bronze
     if not valid_df.isEmpty():
-        event_ts = F.to_timestamp(F.col("d.event_timestamp"))
+        event_ts = F.to_timestamp(F.col("d.event_timestamp"))   
 
         valid_df.select(
             F.col("d.transaction_id"),
@@ -254,7 +254,7 @@ def process_set_batch(batch_df, epoch_id) -> None:
         normals     = staged.filter(F.col("is_correction") == False)
 
         if not normals.isEmpty():
-            normals.writeTo("local.bronze.set_prices").append()
+            normals.writeTo("local.bronze.set_prices").overwritePartitions()
 
         if not corrections.isEmpty():
             corrections.createOrReplaceTempView("set_corrections")
